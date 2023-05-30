@@ -1,0 +1,181 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels:
+    app: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+      - name: api
+        image: nikigor/sre:2
+        ports:
+        - containerPort: 8081
+        env:
+        - name: DSN
+          value: postgresql://myuser:mypassword@db:5432/mydb
+        command: ["./api"]
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+spec:
+  selector:
+    app: api
+  ports:
+  - name: http
+    port: 8081
+    targetPort: 8081
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db
+  labels:
+    app: db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+      - name: db
+        image: postgres:14-alpine
+        env:
+        - name: POSTGRES_USER
+          value: myuser
+        - name: POSTGRES_PASSWORD
+          value: mypassword
+        - name: POSTGRES_DB
+          value: mydb
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: db-data
+          mountPath: /var/lib/postgresql/data
+        - name: db-init-sql
+          mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: db-data
+          persistentVolumeClaim:
+            claimName: db-data-persistent-volume-claim
+        - name: db-init-sql
+          configMap:
+            name: init-sql
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: db-data-persistent-volume-claim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+spec:
+  selector:
+    app: db
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: init-sql
+data:
+  init.sql: |
+    create table mytable (
+        kind text primary key,
+        info text
+    );
+
+    insert into mytable ( kind, info )
+    values 
+    ( 'siberian', 'Порода полудлинношёрстных кошек. Сибирская кошка имеет полудлинную густую шерсть' ), 
+    ( 'sphynx', 'Одна из нескольких бесшерстных пород кошек.' );
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-conf-file
+  labels:
+    app: nginx
+data:
+  nginx.conf: |
+    server {
+      listen 80;
+      location / {
+        add_header 'Content-Type' 'text/html';
+        return 200 "Cats and Dogs Review App";
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-proxy
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx
+          ports:
+          - containerPort: 80
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d/
+              readOnly: true
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: nginx-conf-file
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+spec:
+  selector:
+    app: nginx
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
