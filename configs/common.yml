@@ -1,0 +1,68 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: init-cats-sql
+data:
+  init-cats.sql: |
+    create table mytable (
+        kind text primary key,
+        info text
+    );
+
+    insert into mytable ( kind, info )
+    values 
+    ( 'siberian', 'Порода полудлинношёрстных кошек. Сибирская кошка имеет полудлинную густую шерсть' ), 
+    ( 'sphynx', 'Одна из нескольких бесшерстных пород кошек' );
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: init-dogs-sql
+data:
+  init-dogs.sql: |
+    create table mytable (
+        kind text primary key,
+        info text
+    );
+
+    insert into mytable ( kind, info )
+    values 
+    ( 'husky', 'Общее название для нескольких пород ездовых собак, выведенных в северных регионах' ), 
+    ( 'collie', 'Группа пород пастушьих собак, происходящих из Шотландии и Северной Англии' );
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-srv
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+  - host: app.example.com
+    http:
+      paths:
+      - pathType: Exact
+        path: /
+        backend:
+          service:
+            name: nginx-svc
+            port: 
+              number: 80
+      - pathType: Prefix
+        path: /cats
+        backend:
+          service:
+            name: stateful-cats-svc
+            port:
+              number: 80
+      - pathType: Prefix
+        path: /dogs
+        backend:
+          service:
+            name: stateful-dogs-svc
+            port:
+              number: 80
+

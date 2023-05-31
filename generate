@@ -1,0 +1,6 @@
+#!/bin/bash
+
+cat configs/common.yml > config.yml
+cat configs/nginx.yml >> config.yml
+ANIMALS=dogs envsubst < configs/animals.yml >> config.yml
+ANIMALS=cats envsubst < configs/animals.yml >> config.yml

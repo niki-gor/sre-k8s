@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 
 	"log"
@@ -17,6 +18,10 @@ func main() {
 	if dsn == "" {
 		log.Fatal("DSN environment variable not set")
 	}
+	animals := os.Getenv("ANIMALS")
+	if animals == "" {
+		log.Fatal("ANIMALS environment variable not set")
+	}
 
 	db, err := sql.Open("postgres", dsn+"?sslmode=disable")
 	if err != nil {
@@ -26,7 +31,8 @@ func main() {
 
 	e := echo.New()
 
-	e.GET("/:kind", func(c echo.Context) error {
+	route := fmt.Sprintf("/%s/:kind", animals)
+	e.GET(route, func(c echo.Context) error {
 		kind := c.Param("kind")
 		var info string
 		err := db.QueryRow("SELECT info FROM mytable WHERE kind = $1", kind).Scan(&info)

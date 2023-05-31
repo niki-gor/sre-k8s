@@ -1,116 +1,10 @@
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: api
-  labels:
-    app: api
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: api
-  template:
-    metadata:
-      labels:
-        app: api
-    spec:
-      containers:
-      - name: api
-        image: nikigor/sre:2
-        ports:
-        - containerPort: 8081
-        env:
-        - name: DSN
-          value: postgresql://myuser:mypassword@db:5432/mydb
-        command: ["./api"]
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: api
-spec:
-  selector:
-    app: api
-  ports:
-  - name: http
-    port: 8081
-    targetPort: 8081
-
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: db
-  labels:
-    app: db
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: db
-  template:
-    metadata:
-      labels:
-        app: db
-    spec:
-      containers:
-      - name: db
-        image: postgres:14-alpine
-        env:
-        - name: POSTGRES_USER
-          value: myuser
-        - name: POSTGRES_PASSWORD
-          value: mypassword
-        - name: POSTGRES_DB
-          value: mydb
-        ports:
-        - containerPort: 5432
-        volumeMounts:
-        - name: db-data
-          mountPath: /var/lib/postgresql/data
-        - name: db-init-sql
-          mountPath: /docker-entrypoint-initdb.d
-      volumes:
-        - name: db-data
-          persistentVolumeClaim:
-            claimName: db-data-persistent-volume-claim
-        - name: db-init-sql
-          configMap:
-            name: init-sql
-
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: db-data-persistent-volume-claim
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
-  
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: db
-spec:
-  selector:
-    app: db
-  ports:
-  - name: postgres
-    port: 5432
-    targetPort: 5432
-
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: init-sql
+  name: init-cats-sql
 data:
-  init.sql: |
+  init-cats.sql: |
     create table mytable (
         kind text primary key,
         info text
@@ -119,7 +13,58 @@ data:
     insert into mytable ( kind, info )
     values 
     ( 'siberian', 'Порода полудлинношёрстных кошек. Сибирская кошка имеет полудлинную густую шерсть' ), 
-    ( 'sphynx', 'Одна из нескольких бесшерстных пород кошек.' );
+    ( 'sphynx', 'Одна из нескольких бесшерстных пород кошек' );
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: init-dogs-sql
+data:
+  init-dogs.sql: |
+    create table mytable (
+        kind text primary key,
+        info text
+    );
+
+    insert into mytable ( kind, info )
+    values 
+    ( 'husky', 'Общее название для нескольких пород ездовых собак, выведенных в северных регионах' ), 
+    ( 'collie', 'Группа пород пастушьих собак, происходящих из Шотландии и Северной Англии' );
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-srv
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+  - host: app.example.com
+    http:
+      paths:
+      - pathType: Exact
+        path: /
+        backend:
+          service:
+            name: nginx-svc
+            port: 
+              number: 80
+      - pathType: Prefix
+        path: /cats
+        backend:
+          service:
+            name: stateful-cats-svc
+            port:
+              number: 80
+      - pathType: Prefix
+        path: /dogs
+        backend:
+          service:
+            name: stateful-dogs-svc
+            port:
+              number: 80
 
 ---
 apiVersion: v1
@@ -142,7 +87,7 @@ data:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nginx-proxy
+  name: nginx-deploy
 spec:
   selector:
     matchLabels:
@@ -157,7 +102,8 @@ spec:
         - name: nginx
           image: nginx
           ports:
-          - containerPort: 80
+          - name: nginx-port
+            containerPort: 80
           volumeMounts:
             - name: nginx-conf
               mountPath: /etc/nginx/conf.d/
@@ -171,11 +117,150 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: nginx
+  name: nginx-svc
 spec:
   selector:
     app: nginx
   ports:
   - name: http
     port: 80
-    targetPort: 80
+    targetPort: nginx-port
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stateful-dogs-deploy
+  labels:
+    app: stateful-dogs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stateful-dogs
+  template:
+    metadata:
+      labels:
+        app: stateful-dogs
+    spec:
+      containers:
+      - name: api-dogs
+        image: nikigor/sre:3
+        ports:
+        - name: api-dogs-port
+          containerPort: 8081
+        env:
+        - name: DSN
+          value: postgresql://myuser:mypassword@stateful-dogs-svc:5432/mydb
+        - name: ANIMALS
+          value: dogs
+        command: ["./api"]
+      - name: db
+        image: postgres:14-alpine
+        env:
+        - name: POSTGRES_USER
+          value: myuser
+        - name: POSTGRES_PASSWORD
+          value: mypassword
+        - name: POSTGRES_DB
+          value: mydb
+        ports:
+        - name: db-dogs-port
+          containerPort: 5432
+        volumeMounts:
+        - name: db-dogs-data
+          mountPath: /var/lib/postgresql/data
+        - name: db-dogs-init-sql
+          mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: db-dogs-data
+          emptyDir: {}
+        - name: db-dogs-init-sql
+          configMap:
+            name: init-dogs-sql
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stateful-dogs-svc
+spec:
+  selector:
+    app: stateful-dogs
+  ports:
+  - name: api-dogs-http
+    port: 80
+    targetPort: api-dogs-port
+  - name: db-dogs-http
+    port: 5432
+    targetPort: db-dogs-port
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stateful-cats-deploy
+  labels:
+    app: stateful-cats
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stateful-cats
+  template:
+    metadata:
+      labels:
+        app: stateful-cats
+    spec:
+      containers:
+      - name: api-cats
+        image: nikigor/sre:3
+        ports:
+        - name: api-cats-port
+          containerPort: 8081
+        env:
+        - name: DSN
+          value: postgresql://myuser:mypassword@stateful-cats-svc:5432/mydb
+        - name: ANIMALS
+          value: cats
+        command: ["./api"]
+      - name: db
+        image: postgres:14-alpine
+        env:
+        - name: POSTGRES_USER
+          value: myuser
+        - name: POSTGRES_PASSWORD
+          value: mypassword
+        - name: POSTGRES_DB
+          value: mydb
+        ports:
+        - name: db-cats-port
+          containerPort: 5432
+        volumeMounts:
+        - name: db-cats-data
+          mountPath: /var/lib/postgresql/data
+        - name: db-cats-init-sql
+          mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: db-cats-data
+          emptyDir: {}
+        - name: db-cats-init-sql
+          configMap:
+            name: init-cats-sql
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stateful-cats-svc
+spec:
+  selector:
+    app: stateful-cats
+  ports:
+  - name: api-cats-http
+    port: 80
+    targetPort: api-cats-port
+  - name: db-cats-http
+    port: 5432
+    targetPort: db-cats-port
+
